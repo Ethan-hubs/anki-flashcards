@@ -1,0 +1,14 @@
+[Unit]
+Description=Spaced Repetition Flashcards
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/anki-flashcards
+ExecStart=/usr/bin/python3 /opt/anki-flashcards/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

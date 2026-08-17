@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>闪卡复习 · Spaced Repetition</title>
+<style>
+:root {
+  --bg: #f5f6fa; --card: #fff; --primary: #4f6ef7; --primary-dark: #3b56d8;
+  --text: #1f2430; --muted: #8a91a5; --border: #e4e7f0;
+  --green: #2ecc71; --red: #e74c3c; --orange: #f39c12; --blue: #4f6ef7;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+.container { max-width: 720px; margin: 0 auto; padding: 16px; }
+
+/* 顶部 */
+.header { display:flex; align-items:center; justify-content:space-between; padding: 12px 0 16px; }
+.header h1 { font-size: 20px; font-weight: 700; }
+.header .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.header .stats { text-align:right; font-size: 12px; color: var(--muted); }
+
+/* 章节列表 */
+.chapter-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.chapter-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; cursor: pointer; transition: transform .12s, box-shadow .12s; }
+.chapter-card:active { transform: scale(.97); }
+.chapter-card:hover { box-shadow: 0 4px 16px rgba(79,110,247,.12); }
+.chapter-card .name { font-weight: 600; font-size: 15px; }
+.chapter-card .meta { font-size: 12px; color: var(--muted); margin-top: 6px; display:flex; justify-content:space-between; }
+.chapter-card .due-badge { background: var(--primary); color:#fff; border-radius: 999px; padding: 2px 10px; font-size: 11px; font-weight: 600; }
+.chapter-card .due-badge.zero { background: #e8eaf2; color: var(--muted); }
+.all-btn { width:100%; margin-bottom: 12px; }
+
+/* 按钮 */
+.btn { display:inline-block; border:none; border-radius: 10px; padding: 12px 20px; font-size: 15px; font-weight: 600; cursor: pointer; background: var(--primary); color:#fff; text-align:center; }
+.btn:hover { background: var(--primary-dark); }
+.btn.ghost { background:#fff; color:var(--primary); border:1.5px solid var(--primary); }
+.btn.small { padding: 6px 12px; font-size: 13px; border-radius: 8px; }
+.btn-row { display:flex; gap:8px; margin-top:10px; }
+
+/* 复习卡片 */
+.review-area { display:none; }
+.review-top { display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
+.review-top .progress { font-weight: 600; color: var(--text); }
+.card-box { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 28px 22px; min-height: 320px; display:flex; flex-direction:column; box-shadow: 0 6px 24px rgba(31,36,48,.06); }
+.card-box .q-type { font-size: 11px; font-weight:700; letter-spacing:.5px; color: var(--primary); background:#eef1ff; display:inline-block; padding:3px 10px; border-radius:999px; align-self:flex-start; margin-bottom:14px; }
+.card-box .chapter-tag { font-size: 11px; color: var(--muted); margin-bottom:10px; }
+.card-box .question { font-size: 17px; line-height: 1.7; white-space: pre-wrap; flex:1; }
+.card-box .answer { display:none; font-size: 15px; line-height: 1.7; white-space: pre-wrap; border-top: 1.5px dashed var(--border); padding-top: 16px; margin-top: 16px; }
+.card-box .answer .label { font-weight:700; color: var(--green); }
+.card-box .explain { display:none; font-size: 13px; line-height:1.7; color:var(--muted); border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; white-space: pre-wrap; }
+.card-box .explain .label { font-weight:600; color: var(--orange); }
+
+/* 选择题选项 */
+.opt-list { display:flex; flex-direction:column; gap:8px; margin-top:14px; }
+.opt { border: 1.5px solid var(--border); border-radius: 10px; padding: 11px 14px; cursor: pointer; font-size: 15px; line-height:1.5; transition: all .1s; }
+.opt:hover { border-color: var(--primary); background:#f7f9ff; }
+.opt.selected { border-color: var(--primary); background:#eef1ff; }
+.opt.correct { border-color: var(--green); background:#eafaf1; }
+.opt.wrong { border-color: var(--red); background:#fdeeee; }
+
+/* 评分按钮 */
+.rate-row { display:none; gap:8px; margin-top: 16px; }
+.rate-btn { flex:1; border:none; border-radius: 10px; padding: 14px 8px; font-size: 14px; font-weight: 600; cursor:pointer; color:#fff; }
+.rate-again { background: var(--red); }
+.rate-hard { background: var(--orange); }
+.rate-good { background: var(--green); }
+.rate-easy { background: var(--blue); }
+
+/* 反馈 */
+.feedback { display:none; font-size: 13px; margin-top: 10px; color: var(--muted); text-align:center; }
+.empty { text-align:center; padding: 60px 20px; color: var(--muted); }
+.empty .big { font-size: 44px; margin-bottom: 12px; }
+
+/* PIN 锁屏 */
+.pin-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.pin-box { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 40px 32px; width: 100%; max-width: 320px; text-align: center; box-shadow: 0 12px 40px rgba(31,36,48,.1); }
+.pin-box .lock-icon { font-size: 40px; margin-bottom: 12px; }
+.pin-box h2 { font-size: 18px; margin-bottom: 6px; }
+.pin-box .pin-hint { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+.pin-box input { width: 100%; text-align: center; font-size: 28px; letter-spacing: 10px; padding: 12px 0; border: 1.5px solid var(--border); border-radius: 12px; outline: none; margin-bottom: 14px; }
+.pin-box input:focus { border-color: var(--primary); }
+.pin-box .pin-err { color: var(--red); font-size: 13px; min-height: 18px; margin-bottom: 10px; }
+.pin-box .btn { width: 100%; }
+</style>
+</head>
+<body>
+<!-- PIN 锁屏 -->
+<div class="pin-overlay" id="pin-overlay">
+  <div class="pin-box">
+    <div class="lock-icon">🔒</div>
+    <h2>闪卡 · 私有</h2>
+    <div class="pin-hint">请输入访问 PIN</div>
+    <input type="password" id="pin-input" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="••••">
+    <div class="pin-err" id="pin-err"></div>
+    <button class="btn" onclick="checkPin()">解锁</button>
+  </div>
+</div>
+
+<div class="container">
+  <!-- 章节选择视图 -->
+  <div id="view-home">
+    <div class="header">
+      <div>
+        <h1>📚 闪卡复习</h1>
+        <div class="sub">Spaced Repetition · 间隔重复</div>
+      </div>
+      <div class="stats" id="global-stats"></div>
+    </div>
+    <button class="btn all-btn" onclick="startAll()">🔁 复习全部待复习</button>
+    <div class="btn-row" style="margin-bottom:12px">
+      <button class="btn ghost small" onclick="showStats()">📊 学习统计</button>
+      <button class="btn ghost small" onclick="exportCSV()">⬇️ 导出卡片</button>
+      <label class="btn ghost small" style="display:inline-block;margin:0;cursor:pointer">⬆️ 导入卡片
+        <input type="file" id="import-file" accept=".csv" style="display:none" onchange="importCSV(event)">
+      </label>
+    </div>
+    <div class="chapter-list" id="chapter-list"></div>
+  </div>
+
+  <!-- 统计视图 -->
+  <div id="view-stats" class="review-area">
+    <div class="review-top">
+      <button class="btn ghost small" onclick="backHome()">← 返回</button>
+      <span class="progress">📊 学习统计</span>
+      <span></span>
+    </div>
+    <div id="stats-content"></div>
+  </div>
+
+  <!-- 复习视图 -->
+  <div id="view-review" class="review-area">
+    <div class="review-top">
+      <button class="btn ghost small" onclick="backHome()">← 章节</button>
+      <span id="review-progress" class="progress"></span>
+      <span id="review-due-left"></span>
+    </div>
+    <div class="card-box" id="card-box">
+      <span class="q-type" id="card-type"></span>
+      <span class="chapter-tag" id="card-chapter"></span>
+      <div class="question" id="card-question"></div>
+      <div class="answer" id="card-answer"><span class="label">✓ 答案</span><div id="answer-text"></div></div>
+      <div class="explain" id="card-explain"><span class="label">📖 解析</span><div id="explain-text"></div></div>
+    </div>
+    <div class="rate-row" id="rate-row">
+      <button class="rate-btn rate-again" onclick="rate(0)">重来</button>
+      <button class="rate-btn rate-hard" onclick="rate(1)">困难</button>
+      <button class="rate-btn rate-good" onclick="rate(2)">良好</button>
+      <button class="rate-btn rate-easy" onclick="rate(3)">简单</button>
+    </div>
+    <div class="feedback" id="feedback"></div>
+  </div>
+</div>
+
+<script src="marked.min.js"></script>
+<script>
+let index = null;
+let queue = [];
+let pos = 0;
+let current = null;
+let sessionChapter = null;
+let sessionType = null;
+
+// PIN 锁屏（SHA-256 校验，localStorage 记 7 天）
+// 零配置：PIN_HASH 为占位符/空时跳过锁屏（开箱即用）
+// 配置 PIN：echo -n "你的PIN" | sha256sum 写入 PIN_HASH
+const PIN_HASH = '';
+const PIN_KEY = 'anki_pin_unlock_ts';
+
+async function sha256(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function checkPin() {
+  const input = document.getElementById('pin-input').value.trim();
+  const err = document.getElementById('pin-err');
+  if (!input) { err.textContent = '请输入 PIN'; return; }
+  const hash = await sha256(input);
+  if (hash === PIN_HASH) {
+    localStorage.setItem(PIN_KEY, String(Date.now()));
+    unlock();
+  } else {
+    err.textContent = 'PIN 错误，请重试';
+    document.getElementById('pin-input').value = '';
+  }
+}
+
+function unlock() {
+  document.getElementById('pin-overlay').style.display = 'none';
+  init();
+}
+
+async function checkPinState() {
+  // 零配置：未设置 PIN_HASH 则跳过锁屏
+  if (!PIN_HASH) { unlock(); return; }
+  const ts = parseInt(localStorage.getItem(PIN_KEY) || '0', 10);
+  const VALID_MS = 7 * 24 * 3600 * 1000;
+  if (ts && (Date.now() - ts) < VALID_MS) {
+    unlock();
+  } else {
+    document.getElementById('pin-overlay').style.display = 'flex';
+    document.getElementById('pin-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') checkPin();
+    });
+  }
+}
+
+async function api(path, opts={}) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(path + ' -> ' + r.status);
+  return r.json();
+}
+
+async function init() {
+  const data = await api('/api/index');
+  index = data.chapters;
+  const totalCards = data.total;
+  const dueAll = data.chapters.reduce((s, c) => s + c.due, 0);
+  document.getElementById('global-stats').innerHTML =
+    `${totalCards} 张卡<br>待复习 <b style="color:var(--primary)">${dueAll}</b>`;
+  renderChapters();
+}
+
+function renderChapters() {
+  const el = document.getElementById('chapter-list');
+  el.innerHTML = index.map(c => `
+    <div class="chapter-card" onclick="startChapter('${c.chapter}')">
+      <div class="name">${c.chapter_title}</div>
+      <div class="meta">
+        <span>${c.count} 张 · 选择${c.choice}/问答${c.qa}</span>
+        <span class="due-badge ${c.due === 0 ? 'zero' : ''}">待复习 ${c.due}</span>
+      </div>
+    </div>`).join('');
+}
+
+async function startChapter(chapter) {
+  sessionChapter = chapter;
+  sessionType = null;
+  const r = await api('/api/cards?chapter=' + encodeURIComponent(chapter) + '&limit=200&mode=due');
+  queue = r.cards;
+  pos = 0;
+  if (!queue.length) { alert('本章暂无待复习卡片，先学新卡？'); }
+  enterReview();
+}
+
+async function startAll() {
+  sessionChapter = null;
+  sessionType = null;
+  const r = await api('/api/cards?limit=300&mode=due');
+  queue = r.cards;
+  pos = 0;
+  enterReview();
+}
+
+function enterReview() {
+  if (!queue.length) {
+    document.getElementById('view-home').style.display = 'block';
+    document.getElementById('view-review').style.display = 'none';
+    document.getElementById('feedback').style.display = 'block';
+    document.getElementById('feedback').textContent = '🎉 本轮复习完成！';
+    init();
+    return;
+  }
+  document.getElementById('view-home').style.display = 'none';
+  document.getElementById('view-review').style.display = 'block';
+  showCard();
+}
+
+function md(text) {
+  if (!text) return '';
+  try { return marked.parse(text); } catch (e) { return text; }
+}
+
+function showCard() {
+  current = queue[pos];
+  document.getElementById('card-type').textContent =
+    current.type === 'choice' ? '📝 选择题' : '💡 问答题';
+  document.getElementById('card-chapter').textContent = current.chapter_title;
+  document.getElementById('card-question').innerHTML = md(current.question);
+  document.getElementById('answer-text').innerHTML = md(current.answer);
+  document.getElementById('explain-text').innerHTML = md(current.explain || '');
+  document.getElementById('card-answer').style.display = 'none';
+  document.getElementById('card-explain').style.display = 'none';
+  document.getElementById('rate-row').style.display = 'none';
+  document.getElementById('feedback').style.display = 'none';
+  document.getElementById('review-progress').textContent =
+    `第 ${pos+1} / ${queue.length} 张`;
+  const dueLeft = queue.slice(pos).filter(c => c.due === true).length;
+  document.getElementById('review-due-left').textContent = '';
+
+  // 选择题：渲染选项
+  const qEl = document.getElementById('card-question');
+  if (current.type === 'choice') {
+    const lines = current.question.split('\n');
+    const opts = [];
+    const stemLines = [];
+    for (const ln of lines) {
+      if (/^[A-D][.、．]/.test(ln.trim())) opts.push(ln.trim());
+      else stemLines.push(ln);
+    }
+    if (opts.length >= 2) {
+      const stemMd = md(stemLines.join('\n').trim());
+      let html = '<div class="opt-list">';
+      opts.forEach((o, i) => { html += `<div class="opt" id="opt-${i}" onclick="pickOpt(${i})">${md(o)}</div>`; });
+      html += '</div>';
+      qEl.innerHTML = stemMd + html;
+      current._opts = opts;
+      return;
+    }
+  }
+  // 问答卡：点击显示答案
+  qEl.onclick = () => { reveal(); };
+  qEl.style.cursor = 'pointer';
+}
+
+function pickOpt(i) {
+  if (current._picked) return;
+  current._picked = true;
+  const opts = current._opts;
+  // 正确答案字母
+  const correctLetters = current.answer.split('\n').map(l => l.trim()[0]).filter(l => /^[A-D]$/.test(l));
+  for (let j = 0; j < opts.length; j++) {
+    const letter = opts[j][0];
+    const el = document.getElementById('opt-' + j);
+    if (correctLetters.includes(letter)) el.classList.add('correct');
+    else if (j === i) el.classList.add('wrong');
+  }
+  reveal();
+}
+
+function reveal() {
+  document.getElementById('card-answer').style.display = 'block';
+  if (current.explain) document.getElementById('card-explain').style.display = 'block';
+  document.getElementById('rate-row').style.display = 'flex';
+  document.getElementById('card-question').onclick = null;
+}
+
+async function rate(rating) {
+  await api('/api/review', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({card_id: current.id, rating})
+  });
+  pos++;
+  if (pos >= queue.length) {
+    const fb = document.getElementById('feedback');
+    fb.style.display = 'block';
+    fb.textContent = '🎉 本轮完成！点击章节返回';
+    setTimeout(() => backHome(), 900);
+    return;
+  }
+  showCard();
+}
+
+function backHome() {
+  document.getElementById('view-home').style.display = 'block';
+  document.getElementById('view-review').style.display = 'none';
+  document.getElementById('view-stats').style.display = 'none';
+  init();
+}
+
+// ---------- 学习统计（热力图） ----------
+async function showStats() {
+  const stats = await api('/api/stats');
+  document.getElementById('view-home').style.display = 'none';
+  document.getElementById('view-review').style.display = 'none';
+  document.getElementById('view-stats').style.display = 'block';
+  const el = document.getElementById('stats-content');
+  // 汇总卡片
+  let byTypeHtml = '';
+  for (const [k, v] of Object.entries(stats.by_type || {})) {
+    byTypeHtml += `<span class="due-badge" style="background:#eef1ff;color:var(--primary);margin-right:6px">${k === 'choice' ? '选择题' : '问答'} ${v}</span>`;
+  }
+  // 热力图：13 周 x 7 天
+  const heatmap = stats.heatmap || {};
+  const today = new Date();
+  const start = new Date(today); start.setDate(today.getDate() - 90);
+  const cells = [];
+  for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+    const key = d.toISOString().slice(0, 10);
+    const n = heatmap[key] || 0;
+    cells.push({ key, n });
+  }
+  const maxN = Math.max(1, ...cells.map(c => c.n));
+  let heatHtml = '<div style="display:grid;grid-template-columns:repeat(13,1fr);gap:3px">';
+  for (const c of cells) {
+    const intensity = c.n === 0 ? '#eef0f4' : `rgba(79,110,247,${0.25 + 0.75 * (c.n / maxN)})`;
+    heatHtml += `<div title="${c.key}: ${c.n} 张" style="aspect-ratio:1;border-radius:3px;background:${intensity}"></div>`;
+  }
+  heatHtml += '</div>';
+  el.innerHTML = `
+    <div class="card-box" style="min-height:0">
+      <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px">
+        <div><div style="font-size:24px;font-weight:700">${stats.total_reviewed}</div><div style="font-size:12px;color:var(--muted)">累计复习</div></div>
+        <div><div style="font-size:24px;font-weight:700">${stats.today_reviewed}</div><div style="font-size:12px;color:var(--muted)">今日复习</div></div>
+        <div><div style="font-size:24px;font-weight:700;color:var(--primary)">${stats.due_now}</div><div style="font-size:12px;color:var(--muted)">待复习</div></div>
+      </div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">近 13 周复习热力图</div>
+      ${heatHtml}
+      <div style="margin-top:16px;font-size:13px;font-weight:600;margin-bottom:6px">题型分布</div>
+      <div>${byTypeHtml}</div>
+      <div style="margin-top:12px;font-size:13px;color:var(--muted)">每张卡回答后自动记录，坚持每天刷几题就能看到热力图成型。</div>
+    </div>`;
+}
+
+// ---------- 导入导出 ----------
+async function exportCSV() {
+  const r = await fetch('/api/export');
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'flashcards.csv';
+  a.click(); URL.revokeObjectURL(url);
+}
+
+async function importCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await fetch('/api/import', { method: 'POST', body: fd });
+  const res = await r.json();
+  alert(`导入完成：${res.imported} 张卡片`);
+  init();
+}
+
+// 启动：先过 PIN 锁屏
+checkPinState().catch(e => console.error(e));
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+services:
+  flashcards:
+    build: .
+    container_name: flashcards
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - FLASHCARD_HOST=0.0.0.0
+      - FLASHCARD_PORT=8090
+    volumes:
+      - ./data:/app/data          # 卡片数据（build_cards.py 产出）
+      - ./raw:/app/raw            # 讲义 md（可选，用于生成卡片）
+      - flashcards-db:/app/review.db  # 复习进度
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/api/due')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  flashcards-db:

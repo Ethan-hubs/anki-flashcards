@@ -1,0 +1,16 @@
+# 学习进度（隐私）
+review.db
+
+# 原始讲义（付费版权内容，不入库）
+raw/
+
+# 生成的卡片数据（个人学习内容，不入库；用 scripts/build_cards.py 自行生成）
+data/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 系统
+.DS_Store
