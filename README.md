@@ -19,6 +19,9 @@
 | 🔁 **FSRS scheduling** | The modern Free Spaced Repetition Scheduler — the algorithm family behind Anki. Rate Again / Hard / Good / Easy. |
 | 📝 **Two card modes** | Multiple-choice (instant feedback + explanation) and Q&A (tap to flip). |
 | 📂 **Per-chapter review** | Study one chapter at a time, or sweep all due cards at once. |
+| ✏️ **In-browser editor** | Add, edit or delete cards directly in the UI — no file editing needed. |
+| 📁 **Custom folders** | Create folders to organize cards into your own groups; move cards between them anytime. |
+| 👆 **Swipe navigation** | Browse cards by swiping left/right on mobile, or with prev/next buttons on desktop. |
 | 📊 **Study stats** | 13-week review heatmap, daily counts, per-chapter / per-type breakdown. |
 | ✨ **Markdown cards** | Questions, answers and explanations support markdown — tables, code, lists. |
 | 🧾 **CSV import / export** | Bring cards in from a spreadsheet; back your deck up anytime. |
@@ -60,7 +63,7 @@ anki-flashcards/
 ├── scripts/
 │   └── build_cards.py     # Card extractor: markdown notes → choice + Q&A cards
 ├── web/
-│   ├── index.html         # Frontend SPA (PIN lock, stats heatmap, markdown)
+│   ├── index.html         # Frontend SPA (PIN lock, card editor, swipe nav, stats heatmap, markdown)
 │   └── marked.min.js      # Markdown renderer (vendored, no CDN dependency)
 ├── tests/
 │   └── test_api.py        # pytest suite (scheduler + API endpoints)
@@ -69,11 +72,8 @@ anki-flashcards/
 │   └── Caddyfile.example         # Caddy reverse proxy example
 ├── data/                  # Generated card data (from build_cards.py, gitignored)
 ├── raw/                   # Your lecture notes (gitignored)
-├── db/
-│   └── schema.sql         # Database schema (SQLite, for reference/migration)
 ├── Dockerfile             # Container image
 ├── docker-compose.yml     # One-command deployment
-├── pyproject.toml         # Package metadata (pip install -e .)
 ├── requirements.txt       # Runtime dependencies
 └── requirements-dev.txt   # Dev/test dependencies
 ```
@@ -102,8 +102,12 @@ echo -n "your-pin" | sha256sum   # write the output into the PIN_HASH constant
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/index` | Chapter list (card counts + due counts) |
+| GET | `/api/index` | Chapter/folder list (card counts + due counts) |
 | GET | `/api/cards?chapter=&type=&limit=&mode=` | Fetch cards (`due` / `new` / `all`) |
+| POST | `/api/cards` | Create a card `{chapter, type, question, answer, explain, tags}` |
+| PUT | `/api/cards/{card_id}` | Update a card (change `chapter` to move it to another folder) |
+| DELETE | `/api/cards/{card_id}` | Delete a card and its review progress |
+| POST | `/api/folders` | Create a folder `{name}` |
 | POST | `/api/review` | Submit a rating `{card_id, rating: 0-3}` |
 | GET | `/api/stats` | Study statistics (totals + heatmap) |
 | GET | `/api/due` | Due-card count |

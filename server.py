@@ -10,7 +10,7 @@ API:
   GET   /api/export         导出卡片 CSV
   POST  /api/import         导入卡片 CSV
 """
-import json, os, sqlite3, time, csv, io
+import json, os, sqlite3, time, csv, io, hashlib
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File, Response
@@ -131,6 +131,49 @@ def find_card(card_id):
             if c["id"] == card_id:
                 return c
     return None
+
+# ---------- 卡片 CRUD（写回 JSON 数据层 + 同步 cards 表） ----------
+def _find_chapter_entry(chapter):
+    for i in load_index():
+        if i["chapter"] == chapter:
+            return i
+    return None
+
+def _save_index():
+    (DATA_DIR / "index.json").write_text(json.dumps(_index, ensure_ascii=False, indent=1), encoding="utf-8")
+
+def _ensure_chapter_entry(chapter):
+    """确保 index.json 有该章节（文件夹）条目，不存在则创建空文件"""
+    load_index()  # 确保 _index 已初始化
+    entry = _find_chapter_entry(chapter)
+    if not entry:
+        fname = f"chapters/{chapter}.json"
+        fp = DATA_DIR / fname
+        if not fp.exists():
+            fp.write_text("[]", encoding="utf-8")
+        entry = {"chapter": chapter, "chapter_title": chapter, "file": fname, "count": 0, "choice": 0, "qa": 0}
+        _index.append(entry)
+        _save_index()
+    return entry
+
+def _write_chapter(entry, cards):
+    """写回章节 JSON + 刷新索引计数与缓存"""
+    fp = DATA_DIR / entry["file"]
+    fp.write_text(json.dumps(cards, ensure_ascii=False), encoding="utf-8")
+    entry["count"] = len(cards)
+    entry["choice"] = sum(1 for c in cards if c.get("type") == "choice")
+    entry["qa"] = sum(1 for c in cards if c.get("type") == "qa")
+    _save_index()
+    _cache.pop(entry["file"], None)
+
+def _sync_card_table(card):
+    """同步卡片到 cards 表（含章节变更时更新 reviews 的 chapter）"""
+    conn = get_db()
+    conn.execute("INSERT OR REPLACE INTO cards (card_id, chapter, card_type, question, answer, explain, tags) VALUES (?,?,?,?,?,?,?)",
+                 (card["id"], card["chapter"], card["type"], card["question"], card["answer"], card.get("explain", ""), ",".join(card.get("tags", []))))
+    conn.execute("UPDATE reviews SET chapter=? WHERE card_id=?", (card["chapter"], card["id"]))
+    conn.commit()
+    conn.close()
 
 def seed_cards_from_data():
     """把 data/chapters/*.json 里的卡片同步进 cards 表（首次启动）"""
@@ -341,6 +384,115 @@ async def import_csv(file: UploadFile = File(...)):
     conn.commit()
     conn.close()
     return {"ok": True, "imported": n}
+
+# ---------- 卡片 CRUD（新增/修改/删除）与文件夹 ----------
+class CardBody(BaseModel):
+    chapter: str
+    type: str = "qa"
+    question: str
+    answer: str
+    explain: str = ""
+    tags: list = []
+
+class FolderBody(BaseModel):
+    name: str
+
+def _card_dict(c):
+    return {"id": c["id"], "type": c["type"], "chapter": c["chapter"],
+            "chapter_title": c["chapter_title"], "question": c["question"],
+            "answer": c["answer"], "explain": c.get("explain", ""), "tags": c.get("tags", [])}
+
+def _validate_card_body(body, is_update=False):
+    chapter = body.chapter.strip()
+    q = body.question.strip()
+    a = body.answer.strip()
+    if not chapter:
+        raise HTTPException(400, "章节不能为空")
+    if not q or not a:
+        raise HTTPException(400, "问题与答案不能为空")
+    if body.type not in ("choice", "qa"):
+        raise HTTPException(400, "type 必须为 choice 或 qa")
+    return chapter, q, a
+
+@app.post("/api/cards")
+def create_card(body: CardBody):
+    """新增卡片（写入章节 JSON + 同步 cards 表）"""
+    chapter, q, a = _validate_card_body(body)
+    entry = _ensure_chapter_entry(chapter)
+    card_id = hashlib.md5((q + "\n" + a).encode()).hexdigest()[:12]
+    if find_card(card_id):
+        raise HTTPException(409, "相同内容的卡片已存在")
+    card = {"id": card_id, "type": body.type, "chapter": chapter,
+            "chapter_title": entry["chapter_title"], "question": q, "answer": a,
+            "explain": body.explain.strip(), "tags": body.tags or []}
+    cards = load_chapter(entry["file"])
+    cards.append(card)
+    _write_chapter(entry, cards)
+    _sync_card_table(card)
+    return {"ok": True, "card": _card_dict(card)}
+
+@app.put("/api/cards/{card_id}")
+def update_card(card_id: str, body: CardBody):
+    """修改卡片（改内容/题型/章节；章节变更自动移动文件）"""
+    old = find_card(card_id)
+    if not old:
+        raise HTTPException(404, "卡片不存在")
+    chapter, q, a = _validate_card_body(body)
+    entry = _ensure_chapter_entry(chapter)
+    card = {"id": card_id, "type": body.type, "chapter": chapter,
+            "chapter_title": entry["chapter_title"], "question": q, "answer": a,
+            "explain": body.explain.strip(), "tags": body.tags or []}
+    # 章节变更：从旧章节文件移除
+    if old["chapter"] != chapter:
+        old_entry = _find_chapter_entry(old["chapter"])
+        if old_entry:
+            old_cards = load_chapter(old_entry["file"])
+            _write_chapter(old_entry, [c for c in old_cards if c["id"] != card_id])
+    cards = load_chapter(entry["file"])
+    replaced = False
+    for idx, c in enumerate(cards):
+        if c["id"] == card_id:
+            cards[idx] = card
+            replaced = True
+            break
+    if not replaced:
+        cards.append(card)
+    _write_chapter(entry, cards)
+    _sync_card_table(card)
+    return {"ok": True, "card": _card_dict(card)}
+
+@app.delete("/api/cards/{card_id}")
+def delete_card(card_id: str):
+    """删除卡片（章节 JSON + cards/reviews/review_log）"""
+    old = find_card(card_id)
+    conn = get_db()
+    if old:
+        entry = _find_chapter_entry(old["chapter"])
+        if entry:
+            cards = load_chapter(entry["file"])
+            _write_chapter(entry, [c for c in cards if c["id"] != card_id])
+    else:
+        row = conn.execute("SELECT card_id FROM cards WHERE card_id=?", (card_id,)).fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(404, "卡片不存在")
+    conn.execute("DELETE FROM cards WHERE card_id=?", (card_id,))
+    conn.execute("DELETE FROM reviews WHERE card_id=?", (card_id,))
+    conn.execute("DELETE FROM review_log WHERE card_id=?", (card_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+@app.post("/api/folders")
+def create_folder(body: FolderBody):
+    """创建文件夹（即自定义章节分组）"""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "名称不能为空")
+    if _find_chapter_entry(name):
+        raise HTTPException(409, "文件夹已存在")
+    entry = _ensure_chapter_entry(name)
+    return {"ok": True, "chapter": entry["chapter"]}
 
 # 静态前端
 app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")

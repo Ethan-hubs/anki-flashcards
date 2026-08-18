@@ -104,3 +104,86 @@ def test_import_csv():
     r = client.post("/api/import", files={"file": ("test.csv", csv_content, "text/csv")})
     assert r.status_code == 200
     assert r.json()["imported"] == 1
+
+
+# ---------- 卡片 CRUD 与文件夹 ----------
+
+def test_create_card():
+    r = client.post("/api/cards", json={
+        "chapter": "第一章", "type": "qa", "question": "新增题?", "answer": "新增答", "explain": "", "tags": ["新"]})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    cid = data["card"]["id"]
+    assert len(cid) == 12  # md5 前 12 位
+    # 章节 JSON 与 cards 表都已更新
+    r2 = client.get("/api/cards", params={"chapter": "第一章", "limit": 100, "mode": "all"})
+    ids = [c["id"] for c in r2.json()["cards"]]
+    assert cid in ids
+    conn = __import__("sqlite3").connect(os.environ["FLASHCARD_DB"])
+    n = conn.execute("SELECT COUNT(*) FROM cards WHERE card_id=?", (cid,)).fetchone()[0]
+    conn.close()
+    assert n == 1
+    # 重复内容 → 409
+    r3 = client.post("/api/cards", json={
+        "chapter": "第一章", "type": "qa", "question": "新增题?", "answer": "新增答", "explain": ""})
+    assert r3.status_code == 409
+
+
+def test_update_card():
+    # 修改 t1 内容与题型
+    r = client.put("/api/cards/t1", json={
+        "chapter": "第一章", "type": "choice", "question": "Q1改?\nA. x\nB. y", "answer": "A. x", "explain": "解析改", "tags": ["改"]})
+    assert r.status_code == 200
+    assert r.json()["card"]["question"].startswith("Q1改")
+    r2 = client.get("/api/cards", params={"chapter": "第一章", "limit": 100, "mode": "all"})
+    t1 = next(c for c in r2.json()["cards"] if c["id"] == "t1")
+    assert t1["type"] == "choice"
+    assert t1["explain"] == "解析改"
+
+
+def test_move_card_chapter():
+    # 新建文件夹，把 t2 移过去
+    r = client.post("/api/folders", json={"name": "易错题"})
+    assert r.status_code == 200
+    r2 = client.put("/api/cards/t2", json={
+        "chapter": "易错题", "type": "choice", "question": "Q2?\nA. x\nB. y", "answer": "A. x", "explain": ""})
+    assert r2.status_code == 200
+    assert r2.json()["card"]["chapter"] == "易错题"
+    # 原章节不再有 t2，新章节有
+    r3 = client.get("/api/cards", params={"chapter": "第一章", "limit": 100, "mode": "all"})
+    assert all(c["id"] != "t2" for c in r3.json()["cards"])
+    r4 = client.get("/api/cards", params={"chapter": "易错题", "limit": 100, "mode": "all"})
+    assert any(c["id"] == "t2" for c in r4.json()["cards"])
+    # 复习 t2 后再移动，reviews 的 chapter 同步
+    client.post("/api/review", json={"card_id": "t2", "rating": 2})
+    conn = __import__("sqlite3").connect(os.environ["FLASHCARD_DB"])
+    chap = conn.execute("SELECT chapter FROM reviews WHERE card_id='t2'").fetchone()[0]
+    conn.close()
+    assert chap == "易错题"
+
+
+def test_delete_card():
+    client.post("/api/review", json={"card_id": "t3", "rating": 2})
+    r = client.delete("/api/cards/t3")
+    assert r.status_code == 200
+    # 卡片、进度、日志全部清除
+    r2 = client.get("/api/cards", params={"chapter": "第一章", "limit": 100, "mode": "all"})
+    assert all(c["id"] != "t3" for c in r2.json()["cards"])
+    conn = __import__("sqlite3").connect(os.environ["FLASHCARD_DB"])
+    for tbl in ("cards", "reviews", "review_log"):
+        n = conn.execute(f"SELECT COUNT(*) FROM {tbl} WHERE card_id='t3'").fetchone()[0]
+        assert n == 0
+    conn.close()
+    # 不存在 → 404
+    assert client.delete("/api/cards/nope").status_code == 404
+
+
+def test_create_folder_duplicate():
+    r = client.post("/api/folders", json={"name": "易错题"})
+    assert r.status_code == 409
+    r2 = client.post("/api/folders", json={"name": "  "})
+    assert r2.status_code == 400
+    # 新文件夹出现在 index
+    r3 = client.get("/api/index")
+    assert any(c["chapter"] == "易错题" for c in r3.json()["chapters"])
